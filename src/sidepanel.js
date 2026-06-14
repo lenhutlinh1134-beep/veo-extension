@@ -12,7 +12,6 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   updatePath();
   refreshState();
-  fetchProjects();
 
   // ── Tabs ──
   document.querySelectorAll('.tab').forEach(tab => {
@@ -45,7 +44,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (selPlatform) {
     selPlatform.addEventListener('change', () => {
       platform = selPlatform.value;
-      updateActiveModeForPlatform();
       updateImgSelectVisibility();
       updateModeHint();
       updatePath();
@@ -72,15 +70,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('f-txt')?.addEventListener('change', importTxt);
   document.getElementById('f-csv')?.addEventListener('change', importCsv);
 
-  // ── Path builder inputs ──
-  document.getElementById('inp-root')?.addEventListener('input', () => { updatePath(); saveSettings(); });
-  document.getElementById('inp-project')?.addEventListener('input', () => { updatePath(); saveSettings(); });
-  
-  document.getElementById('chk-date')?.addEventListener('change', (e) => {
-    settings.organizeByDate = e.target.checked;
-    updatePath();
-    saveSettings();
-  });
+  // ── Path update on input change ──
+  document.getElementById('inp-root')?.addEventListener('input', updatePath);
+  document.getElementById('inp-project')?.addEventListener('input', updatePath);
 
   // ── Main buttons ──
   document.getElementById('btn-test')?.addEventListener('click', testConnection);
@@ -101,7 +93,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   countPrompts();
   updateImgSelectVisibility();
-  updateActiveModeForPlatform();
 });
 
 // ── Nhận state updates từ background ──
@@ -114,28 +105,13 @@ chrome.runtime.onMessage.addListener(msg => {
 // ══════════════════════════
 function updatePath() {
   const root = document.getElementById('inp-root')?.value || 'VEO_Automation';
-  const proj = document.getElementById('inp-project')?.value || 'tên-dự-án';
-  const date = settings.organizeByDate ? '\\' + new Date().toISOString().slice(0, 10) : '';
-
-  let platformLabel, subLabel;
-  if (platform === 'meta-ai') {
-    platformLabel = 'HÀNH ĐỘNG'; subLabel = 'frame-videos';
-  } else if (platform === 'aistudio-speech') {
-    platformLabel = 'ÂM THANH'; subLabel = 'am_thanh';
-  } else {
-    platformLabel = ''; subLabel = settings.organizeByMode ? getModeFolder(mode) : '';
-  }
-
-  const parts = [root, proj];
-  if (platformLabel) parts.push(platformLabel);
-  const mid = parts.join('\\') + date;
-  
-  const end = subLabel ? '\\' + subLabel + '\\001_SCENE.mp4' : '\\001_SCENE.mp4';
-  
-  const preview = document.getElementById('pb-preview');
-  if (preview) {
-    preview.textContent = mid + end;
-  }
+  const proj = document.getElementById('inp-project')?.value || '';
+  const parts = [root];
+  if (proj) parts.push(proj);
+  if (settings.organizeByDate) parts.push(new Date().toISOString().slice(0, 10));
+  if (settings.organizeByMode) parts.push(getModeFolder(mode));
+  const display = document.getElementById('path-display');
+  if (display) display.textContent = parts.join('\\') + '\\';
 }
 
 function getModeFolder(m) {
@@ -187,16 +163,6 @@ function updateImgSelectVisibility() {
   const needsImg = imageModes.includes(mode);
   // Show image selector container if mode requires image upload
   container.style.display = needsImg ? 'block' : 'none';
-}
-
-function updateActiveModeForPlatform() {
-  if (platform === 'aistudio-speech') {
-    mode = 'text-to-speech';
-    document.querySelectorAll('.mode-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.mode === 'text-to-speech');
-      b.classList.remove('active-img');
-    });
-  }
 }
 
 async function handleImageSelection(event) {
@@ -258,9 +224,8 @@ function countPrompts() {
   const n = prompts.length;
   const el = document.getElementById('prompt-count');
   if (el) {
-    let typeLabel = 'ảnh';
-    if (mode === 'text-to-speech') typeLabel = 'giọng đọc (audio)';
-    else if (mode.includes('video')) typeLabel = 'video';
+    const isVideo = mode.includes('video');
+    const typeLabel = isVideo ? 'video' : 'ảnh';
     el.innerHTML = `
       <span class="badge-container">
         <span class="badge badge-prompts">${n} prompt</span>
@@ -322,24 +287,8 @@ function getPrompts() {
     const blocks = text.split(/^\[(.*?)\]/m);
     for (let i = 1; i < blocks.length; i += 2) {
       let rawName = blocks[i].trim();
-      let name = rawName.replace(/:/g, '-').replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '_').substring(0, 100);
+      let name = rawName.replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '_').substring(0, 50);
       let promptText = blocks[i+1].trim();
-      if (promptText) prompts.push({ text: promptText, name: name });
-    }
-    if (prompts.length > 0) return prompts;
-  }
-
-  // Format 3 — Headers: AUDIO X — SCENE Y | TITLE (0:00-0:35)
-  const headerRegex = /^(?:AUDIO|SCENE)\s+\d+.*?$/m;
-  if (headerRegex.test(text)) {
-    const prompts = [];
-    const blocks = text.split(/^(?:AUDIO|SCENE)\s+\d+.*?(?:\r?\n)/m);
-    const headers = [...text.matchAll(/^(?:AUDIO|SCENE)\s+\d+.*?$/gm)];
-    for (let i = 0; i < headers.length; i++) {
-      let rawName = headers[i][0].trim();
-      // Keep full header but sanitize illegal Windows filename characters (\ / : * ? " < > |)
-      let name = rawName.replace(/[\\/:*?"<>|]/g, '-').substring(0, 150);
-      let promptText = (blocks[i+1] || '').trim();
       if (promptText) prompts.push({ text: promptText, name: name });
     }
     if (prompts.length > 0) return prompts;
@@ -420,14 +369,22 @@ function importCsv(event) {
 // ══════════════════════════
 async function testConnection() {
   const btn = document.getElementById('btn-test');
-  const platformName = { 'meta-ai': 'Meta AI', 'aistudio-speech': 'AI Studio Speech', 'google-flow': 'Google Flow' }[platform] || 'Google Flow';
+  const platformName = platform === 'meta-ai' ? 'Meta AI' : 'Google Flow';
   btn.textContent = '⏳ Đang kiểm tra...'; btn.disabled = true;
   try {
     const res = await chrome.runtime.sendMessage({ type: 'TEST_CONNECTION', platform });
     if (res?.ok) {
       const tabUrl = (res.url || '').replace(/^https?:\/\//, '').slice(0, 50);
-      const inputInfo = res.foundInput ? `✓ Ô nhập` : '⚠ Chưa thấy ô nhập';
-      const submitInfo = res.foundSubmit ? ' · ✓ Nút Gửi/Tạo' : ' · ⚠ Chưa thấy nút Gửi/Tạo';
+      const inputInfo = res.foundInput ? `✓ Ô nhập (${res.inputType || '?'})` : '⚠ Chưa thấy ô nhập';
+      // Khoe vị trí nút gửi đã khóa được (xác nhận đúng vị trí GG Lab)
+      let submitInfo;
+      if (res.foundSubmit && res.submitInfo) {
+        submitInfo = `<br>✓ Đã khóa nút gửi: <b style="color:#00e5a0">"${esc(res.submitInfo.label)}"</b> tại vị trí x=${res.submitInfo.x}, y=${res.submitInfo.y} (${res.submitInfo.size})`;
+      } else if (res.foundSubmit) {
+        submitInfo = '<br>✓ Đã thấy nút Gửi/Tạo';
+      } else {
+        submitInfo = `<br>⚠ Chưa khóa được nút Gửi/Tạo${res.buttonsNearInput ? `<br><small style="color:#888">Nút quanh ô nhập: ${esc(res.buttonsNearInput)}</small>` : ''}`;
+      }
 
       // Cảnh báo nếu mode extension không khớp với model Google Flow
       let modelWarn = '';
@@ -446,18 +403,17 @@ async function testConnection() {
         }
       }
 
-      const readyState = res.foundInput && res.foundSubmit
-        ? `<b style="color:#00e5a0">✅ Sẵn sàng chạy!</b>`
-        : `<b style="color:#ff6b6b">⚠ Trang chưa load xong</b>`;
+      // Gửi bằng Enter → chỉ cần thấy Ô NHẬP là sẵn sàng.
+      // (Nút gửi bị KHÓA khi ô trống là bình thường — sẽ hiện sau khi gõ prompt.)
+      const noteSubmit = res.foundSubmit ? '' : '<br><small style="color:#888">ℹ Nút Gửi đang khóa vì ô trống — bình thường. Lúc chạy sẽ gửi bằng Enter sau khi điền prompt.</small>';
+      const readyState = res.foundInput
+        ? `<b style="color:#00e5a0">✅ Sẵn sàng chạy! (gửi bằng Enter)</b>`
+        : `<b style="color:#ff6b6b">⚠ Chưa thấy ô nhập — hãy F5 trang Flow</b>`;
 
-      showBanner(`${readyState}<br><small>${tabUrl}</small><br><small>${inputInfo}${submitInfo}</small>${modelWarn}`, res.foundInput && res.foundSubmit ? 'ok' : 'error');
+      showBanner(`${readyState}<br><small>${tabUrl}</small><br><small>${inputInfo}${submitInfo}</small>${noteSubmit}${modelWarn}`, res.foundInput ? 'ok' : 'error');
     } else {
-      let urlHint = '<b>labs.google/fx/tools/video-fx</b>';
-      if (platform === 'meta-ai') urlHint = '<b>meta.ai/create</b>';
-      else if (platform === 'aistudio-speech') urlHint = '<b>aistudio.google.com/u/4/generate-speech</b>';
-      
       const hint = res?.reason === 'no_tab'
-        ? `Chưa tìm thấy tab ${platformName}.<br>Hãy mở trang ${urlHint} trong Chrome.`
+        ? `Chưa tìm thấy tab ${platformName}.<br>Hãy mở trang ${platform === 'meta-ai' ? '<b>meta.ai/create</b>' : '<b>labs.google/fx/tools/video-fx</b>'} trong Chrome.`
         : `Lỗi: ${res?.reason || res?.error || 'không rõ'}`;
       showBanner(`❌ Kết nối thất bại<br><small>${hint}</small>`, 'error');
     }
@@ -556,14 +512,17 @@ function renderQueue(s) {
     return;
   }
   wrap.innerHTML = `<div class="queue-list">${all.map(item => {
-    const statusTxt = { waiting: 'Đang chờ', running: 'Đang xử lý...', done: '✓ Hoàn thành', failed: `✗ Lỗi: ${item.error || ''}`, stopped: 'Đã dừng' }[item.status] || item.status;
+    const errFull = (item.error || '').trim();
+    const errShort = errFull.length > 90 ? errFull.slice(0, 90) + '…' : errFull;
+    const statusTxt = { waiting: 'Đang chờ', running: 'Đang xử lý...', done: '✓ Hoàn thành', failed: `✗ Lỗi: ${esc(errShort)}`, stopped: 'Đã dừng' }[item.status] || item.status;
+    const titleAttr = item.status === 'failed' && errFull ? ` title="${esc(errFull)}"` : '';
     const bar = item.status === 'running' ? `<div class="q-pbar"><div class="q-pfill" style="width:${item.progress || 0}%"></div></div>` : '';
     const numTxt = item.status === 'done' ? '✓' : item.status === 'failed' ? '✗' : item.id;
     return `<div class="q-item ${item.status}">
       <div class="q-num">${numTxt}</div>
       <div class="q-info">
         <div class="q-text">${esc(item.text)}</div>
-        <div class="q-status">${statusTxt}</div>
+        <div class="q-status"${titleAttr}>${statusTxt}</div>
         ${bar}
       </div>
     </div>`;
@@ -573,28 +532,20 @@ function renderQueue(s) {
 // ══════════════════════════
 // ██ SETTINGS
 // ══════════════════════════
-
 function loadSettings() {
-  chrome.storage.local.get(['veoSettings', 'veoPlatform', 'veoRoot', 'veoProject'], d => {
-    if (d.veoSettings) settings = { ...settings, ...d.veoSettings };
+  chrome.storage.local.get(['veoSettings', 'veoPlatform'], d => {
+    if (d.veoSettings) Object.assign(settings, d.veoSettings);
     if (d.veoPlatform) {
       platform = d.veoPlatform;
       const sel = document.getElementById('sel-platform');
       if (sel) sel.value = platform;
     }
-    if (d.veoRoot) document.getElementById('inp-root').value = d.veoRoot;
-    if (d.veoProject) document.getElementById('inp-project').value = d.veoProject;
-    
-    const chkDate = document.getElementById('chk-date');
-    if (chkDate) chkDate.checked = !!settings.organizeByDate;
-
     document.querySelectorAll('.toggle[data-key]').forEach(toggle => {
       const key = toggle.dataset.key;
       if (key && settings[key] !== undefined) {
         toggle.classList.toggle('on', settings[key]);
       }
     });
-
     updateImgSelectVisibility();
     updateModeHint();
     updatePath();
@@ -604,25 +555,8 @@ function loadSettings() {
 function saveSettings() { 
   chrome.storage.local.set({ 
     veoSettings: settings,
-    veoPlatform: platform,
-    veoRoot: document.getElementById('inp-root')?.value || '',
-    veoProject: document.getElementById('inp-project')?.value || ''
+    veoPlatform: platform
   }); 
-}
-
-async function fetchProjects() {
-  try {
-    const res = await fetch('http://localhost:4000/api/projects');
-    const data = await res.json();
-    if (data.projects) {
-      const list = document.getElementById('project-list');
-      if (list) {
-        list.innerHTML = data.projects.map(p => `<option value="${p}"></option>`).join('');
-      }
-    }
-  } catch (e) {
-    // Backend không chạy, bỏ qua
-  }
 }
 
 // ══════════════════════════

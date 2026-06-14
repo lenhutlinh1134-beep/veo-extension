@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VEO Automation</title>
+<title>VEO & Meta Automation</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -58,8 +58,8 @@ body {
 .header-logo { 
   font-size: 22px; 
   background: linear-gradient(135deg, var(--accent2), var(--accent));
-  background-clip: text;
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   filter: drop-shadow(0 2px 8px rgba(0, 229, 160, 0.2));
 }
@@ -318,23 +318,7 @@ textarea::placeholder { color: var(--text-dark); }
 input[type=file] { display: none; }
 
 /* Settings */
-.settings-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 10px; }
-
-/* Path Builder */
-.path-builder { background:rgba(0,229,160,0.03); border:1px solid rgba(0,229,160,0.15); border-radius:10px; padding:10px 12px; margin-bottom:10px; }
-.pb-hd { font-size:10px; color:var(--accent); font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:7px; }
-.path-bar { display:flex; flex-wrap:wrap; align-items:center; gap:0; background:rgba(0,0,0,0.25); border-radius:8px; padding:7px 10px; min-height:32px; }
-.pb-fixed { color:var(--text-muted); font-family:monospace; font-size:11px; }
-.pb-sep { color:rgba(255,255,255,0.2); font-family:monospace; font-size:11px; padding:0 3px; }
-.pb-input { background:transparent; border:none; outline:none; color:var(--text); font-family:monospace; font-size:11px; padding:1px 4px; border-radius:4px; min-width:10px; }
-.pb-input:focus { background:rgba(108,99,255,0.18); }
-.pb-input:hover:not(:focus) { background:rgba(108,99,255,0.08); }
-.pb-input::placeholder { color:rgba(255,255,255,0.2); }
-.pb-auto { color:#86efac; font-family:monospace; font-size:11px; }
-.pb-file { color:rgba(255,255,255,0.25); font-family:monospace; font-size:11px; font-style:italic; }
-.pb-chips { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; align-items:center; }
-.pb-chip { padding:3px 9px; border-radius:20px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.04); color:var(--text-muted); font-size:10px; cursor:pointer; transition:all 0.15s; }
-.pb-chip.active { border-color:rgba(0,229,160,0.5); background:rgba(0,229,160,0.1); color:var(--accent); }
+.settings-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 12px; }
 
 /* Buttons */
 .action-row { display: flex; gap: 8px; margin: 12px 0 8px; }
@@ -450,7 +434,7 @@ input[type=file] { display: none; }
 .q-item.failed .q-num { background: var(--red); color: #fff; }
 .q-info { flex: 1; min-width: 0; }
 .q-text { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; font-weight: 500; }
-.q-status { font-size: 10px; color: var(--text-muted); font-weight: 500; }
+.q-status { font-size: 10px; color: var(--text-muted); font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; cursor: help; }
 .q-item.running .q-status { color: var(--yellow); }
 .q-item.done .q-status { color: var(--accent); }
 .q-item.failed .q-status { color: var(--red); }
@@ -579,10 +563,10 @@ code { background: rgba(56, 189, 248, 0.08); padding: 1px 5px; border-radius: 4p
 <div class="header">
   <div class="header-logo">🤖</div>
   <div>
-    <div class="header-title">VEO Automation</div>
-    <div class="header-sub">Auto VEO on Google Flow</div>
+    <div class="header-title">VEO & Meta Automation</div>
+    <div class="header-sub">Auto Google Flow & Meta.ai</div>
   </div>
-  <div class="ver">v2.1</div>
+  <div class="ver">v2.2.0</div>
 </div>
 
 <div class="tabs">
@@ -601,7 +585,6 @@ code { background: rgba(56, 189, 248, 0.08); padding: 1px 5px; border-radius: 4p
     <select id="sel-platform" style="font-weight: 600; color: var(--accent); border-color: rgba(0, 229, 160, 0.2); background: rgba(0, 229, 160, 0.03);">
       <option value="google-flow" selected>🟢 Google Flow (labs.google)</option>
       <option value="meta-ai">🔵 Meta AI (meta.ai)</option>
-      <option value="aistudio-speech">🗣️ Google AI Studio Speech (aistudio)</option>
     </select>
   </div>
 
@@ -624,9 +607,6 @@ code { background: rgba(56, 189, 248, 0.08); padding: 1px 5px; border-radius: 4p
     </button>
     <button class="mode-btn" data-mode="last-image-to-image">
       <span class="icon">↩🖼</span>Ảnh cuối
-    </button>
-    <button class="mode-btn" data-mode="text-to-speech">
-      <span class="icon">🗣️</span>Tạo Giọng Đọc
     </button>
   </div>
 
@@ -657,7 +637,7 @@ code { background: rgba(56, 189, 248, 0.08); padding: 1px 5px; border-radius: 4p
     </span>
   </div>
   <textarea id="prompt-area"
-    placeholder="4 formats được hỗ trợ:&#10;&#10;① Markdown (chuẩn):&#10;**SCENE 01 — HOOK**&#10;```&#10;prompt text here...&#10;```&#10;&#10;② Bracket: [SCENE 1 | HOOK]&#10;prompt text...&#10;&#10;③ Headers: AUDIO 1 — SCENE 1 | HOOK (0:00–0:35)&#10;prompt text...&#10;&#10;④ Mỗi dòng 1 prompt (đơn giản nhất)"></textarea>
+    placeholder="3 formats được hỗ trợ:&#10;&#10;① Markdown (chuẩn):&#10;**SCENE 01 — HOOK**&#10;```&#10;prompt text here...&#10;```&#10;&#10;② Bracket: [SCENE 1 | HOOK]&#10;prompt text...&#10;&#10;③ Mỗi dòng 1 prompt (đơn giản nhất)"></textarea>
 
   <!-- Live Parsed Prompt Preview Box -->
   <div class="preview-header">🔍 Danh sách quét được (Kiểm soát lỗi)</div>
@@ -674,35 +654,16 @@ code { background: rgba(56, 189, 248, 0.08); padding: 1px 5px; border-radius: 4p
   <input type="file" id="f-txt" accept=".txt">
   <input type="file" id="f-csv" accept=".csv">
 
-  <!-- Path Builder -->
-  <div class="path-builder">
-    <div class="pb-hd">Cấu trúc lưu file</div>
-    
-    <div style="margin-bottom: 8px;">
-      <label style="font-size: 10px; color: var(--text-dark); margin-bottom: 4px; display: block;">Thư mục gốc</label>
-      <input class="pb-input" id="inp-root" value="VEO_Automation" placeholder="VEO_Automation" title="Tên thư mục gốc hoặc đường dẫn tuyệt đối (VD: D:\VEO)" style="width: 100%; border-radius: 4px; padding: 6px; font-size: 11px;">
-    </div>
-
-    <div style="margin-bottom: 8px;">
-      <label style="font-size: 10px; color: var(--text-dark); margin-bottom: 4px; display: block;">Tên dự án</label>
-      <input class="pb-input" id="inp-project" list="project-list" placeholder="tên-dự-án" style="width: 100%; border-radius: 4px; padding: 6px; font-size: 11px;">
-      <datalist id="project-list"></datalist>
-    </div>
-
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-      <label style="font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
-        <input type="checkbox" id="chk-date" checked> Phân loại theo ngày
-      </label>
-    </div>
-
-    <!-- Live Preview -->
-    <div class="path-bar" style="background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; font-size: 11px;">
-      <span id="pb-preview" style="color: var(--accent2); word-break: break-all;">VEO_Automation\tên-dự-án\HÀNH ĐỘNG\2026-06-14\frame-videos\001_SCENE.mp4</span>
-    </div>
-  </div>
-
-  <!-- Concurrent + Delay -->
+  <!-- Settings nhanh -->
   <div class="settings-row">
+    <div class="field">
+      <label>Thư mục gốc</label>
+      <input type="text" id="inp-root" value="VEO_Automation" placeholder="VEO_Automation">
+    </div>
+    <div class="field">
+      <label>Tên dự án</label>
+      <input type="text" id="inp-project" placeholder="mysteries-asia">
+    </div>
     <div class="field">
       <label>Luồng (Concurrent)</label>
       <input type="number" id="inp-concurrent" value="1" min="1" max="3">
@@ -711,6 +672,15 @@ code { background: rgba(56, 189, 248, 0.08); padding: 1px 5px; border-radius: 4p
       <label>Delay (giây)</label>
       <input type="number" id="inp-delay" value="5" min="2" max="120">
     </div>
+  </div>
+
+  <!-- Path preview -->
+  <div style="background:rgba(0,229,160,0.03);border:1px solid rgba(0,229,160,0.15);border-radius:10px;padding:10px 12px;margin-bottom:12px">
+    <div style="font-size:10px;color:var(--accent);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">📁 Đường dẫn tải file:</div>
+    <div id="path-preview" style="font-family:monospace;font-size:11px;color:#86efac;word-break:break-all">
+      📂 Downloads\<span id="path-display">VEO_Automation\</span>001_prompt.mp4
+    </div>
+    <div style="font-size:9px;color:var(--text-muted);margin-top:6px;line-height:1.3">💡 Khuyên dùng: Chuyển thư mục download mặc định của Chrome thành <code style="color:var(--accent)">D:\YOUTUBE</code> để lưu trực tiếp vào ổ cứng dự án.</div>
   </div>
 
   <!-- Banner thông báo -->

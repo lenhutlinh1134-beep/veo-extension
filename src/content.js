@@ -42,17 +42,19 @@ window.addEventListener('message', (event) => {
   if (p) { pending.delete(id); p.resolve(event.data); }
 });
 
-// ── Overlay trạng thái ──
+// ── Overlay trạng thái (hộp gọn, cố định, tự cuộn — không tràn dài) ──
 function setStatus(html, color) {
   if (!statusEl) {
     statusEl = document.createElement('div');
     statusEl.id = '__veo_status';
-    statusEl.style.cssText = 'position:fixed;bottom:90px;right:14px;z-index:2147483647;background:#0d0d18ee;border:2px solid #00e5a0;border-radius:12px;padding:12px 16px;font-family:Segoe UI,system-ui,sans-serif;font-size:12px;color:#e0e0f0;min-width:220px;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.8);backdrop-filter:blur(8px);';
+    statusEl.style.cssText = 'position:fixed;bottom:90px;right:14px;z-index:2147483647;background:#0d0d18f2;border:1.5px solid #00e5a0;border-radius:12px;font-family:Segoe UI,system-ui,sans-serif;font-size:12px;color:#e0e0f0;width:300px;max-height:240px;box-shadow:0 8px 32px rgba(0,0,0,.8);backdrop-filter:blur(8px);overflow:hidden;display:flex;flex-direction:column;';
     document.documentElement.appendChild(statusEl);
   }
-  statusEl.style.display = 'block';
+  statusEl.style.display = 'flex';
   statusEl.style.borderColor = color || '#00e5a0';
-  statusEl.innerHTML = `<div style="font-weight:700;color:${color || '#00e5a0'};margin-bottom:6px">🤖 VEO Automation</div>${html}`;
+  statusEl.innerHTML =
+    `<div style="font-weight:700;color:${color || '#00e5a0'};padding:9px 14px 6px;flex:0 0 auto;border-bottom:1px solid #ffffff14">🤖 VEO Automation</div>` +
+    `<div style="padding:8px 14px 11px;overflow-y:auto;line-height:1.45;word-break:break-word">${html}</div>`;
 }
 function hideStatus() { if (statusEl) statusEl.style.display = 'none'; }
 
@@ -83,8 +85,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
-// ── Đợi trang Google Flow load HOÀN TOÀN ──
-async function waitForPageReady(timeout = 60000) {
+// ── Đợi trang Google Flow load — CHỈ cần ô nhập ──
+// (Nút Gửi/Generate bị KHÓA khi ô trống, chỉ hiện sau khi gõ chữ → không thể đòi nó lúc này)
+async function waitForPageReady(timeout = 45000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     const elapsed = Math.round((Date.now() - start) / 1000);
@@ -92,17 +95,13 @@ async function waitForPageReady(timeout = 60000) {
       await ensureInjected();
       const scan = await callInjected('SCAN_PAGE');
 
-      if (scan.foundInput && scan.foundSubmit) {
-        setStatus(`<div style="color:#00e5a0">✅ Trang sẵn sàng!</div>`);
+      if (scan.foundInput) {
+        setStatus(`<div style="color:#00e5a0">✅ Trang sẵn sàng! (đã thấy ô nhập)</div>`);
         await sleep(300);
         return;
       }
 
-      if (scan.foundInput && !scan.foundSubmit) {
-        setStatus(`<div>⏳ Tìm thấy ô nhập nhưng chưa có nút Generate (<b>${elapsed}s</b>)</div><div style="color:#ff6b6b;font-size:11px">Trang đang lỗi — hãy F5 refresh</div>`);
-      } else {
-        setStatus(`<div>⏳ Đợi trang load... <b>${elapsed}s</b></div><div style="color:#888;font-size:11px">Trang lỗi hoặc chưa load → F5</div>`);
-      }
+      setStatus(`<div>⏳ Đợi trang load... <b>${elapsed}s</b></div><div style="color:#888;font-size:11px">Chưa thấy ô nhập → có thể cần F5</div>`);
     } catch (e) {
       setStatus(`<div>⏳ Đợi trang load... <b>${elapsed}s</b></div><div style="color:#888;font-size:11px">Đang inject script...</div>`);
       injected = false;
@@ -110,14 +109,14 @@ async function waitForPageReady(timeout = 60000) {
     }
     await sleep(2000);
   }
-  throw new Error('Trang Google Flow chưa sẵn sàng sau 60 giây.\n→ Hãy F5 refresh trang, đợi load xong hoàn toàn rồi thử lại.');
+  throw new Error('Không thấy ô nhập sau 45 giây.\n→ Hãy F5 refresh trang Google Flow, đợi load xong rồi thử lại.');
 }
 
 // ── Xử lý 1 prompt ──
 async function runItem(item, mode, platform, delayMs, settings = {}) {
   await ensureInjected();
 
-  // Chờ trang load xong
+  // Chờ trang load xong và có ô nhập — xử lý trường hợp "Application error" hoặc trang load chậm
   await waitForPageReady(45000);
 
   setStatus(`<div>⏳ Chờ ${Math.round(delayMs / 1000)}s...</div><div style="color:#aaa;font-size:11px">#${item.id}: ${item.text.slice(0, 50)}...</div>`);
@@ -129,7 +128,7 @@ async function runItem(item, mode, platform, delayMs, settings = {}) {
     setStatus(`<div>📤 Đang tải lên ảnh đính kèm...</div>`);
     const uploadResult = await callInjected('UPLOAD_FILE', { imageBase64: item.image, filename: `frame_${item.id}.png` });
     if (!uploadResult.ok) throw new Error(`Tải ảnh lên thất bại: ${uploadResult.error}`);
-    await sleep(2500);
+    await sleep(2500); // Chờ 2.5s để trang web load ảnh
   }
 
   // Nhập text
@@ -139,23 +138,57 @@ async function runItem(item, mode, platform, delayMs, settings = {}) {
   await sleep(1500);
   prog(item.id, 30);
 
-  // ── Chụp snapshot TRƯỚC khi submit ──
+  // ── Đợi nút gửi active (Google Flow disable nút khi input trống) ──
+  setStatus(`<div>⏳ Đợi nút gửi sẵn sàng...</div>`);
+  let btnReadyCount = 0;
+  while (btnReadyCount < 15) {
+    const btnReady = await callInjected('IS_SUBMIT_ENABLED');
+    if (btnReady?.enabled) break;
+    await sleep(300);
+    btnReadyCount++;
+  }
+  await sleep(800);
+
+  // ── QUAN TRỌNG: Chụp snapshot TRƯỚC khi submit ──
+  // Snapshot sau submit sẽ miss kết quả nếu render nhanh
   const snapSrcs = takeMediaSnapshot(mode);
 
-  // Click submit
-  setStatus(`<div>🚀 Gửi prompt...</div>`);
-  const submitResult = await callInjected('CLICK_SUBMIT');
-  if (!submitResult.ok) throw new Error(`Gửi thất bại: ${submitResult.error}`);
-  await sleep(3000);
+  // ── SUBMIT: Tự động nhấn Enter (TRUSTED_ENTER) ──
+  setStatus(`<div>🚀 Tự động gửi (Enter)...</div>`);
+
+  const tabId = await getCurrentTabId();
+  await callInjected('FOCUS_INPUT');
+  await sleep(300);
+
+  const enterRes = await chrome.runtime.sendMessage({
+    type: 'TRUSTED_ENTER',
+    tabId
+  });
+
+  if (!enterRes?.ok) {
+    console.warn('[VEO] TRUSTED_ENTER failed:', enterRes?.error);
+  }
+
+  // Chờ render bắt đầu
+  await sleep(2000);
+
+  // Kiểm tra xem render đã bắt đầu chưa (progress bar / % / ảnh mới)
+  const hasStarted = await callInjected('CHECK_RENDER_STARTED', { snapshot: Array.from(snapSrcs) });
+  if (!hasStarted?.started) {
+    // Không throw error — có thể render chậm, tiếp tục chờ xem
+    console.warn('[VEO] Render chưa bắt đầu, nhưng tiếp tục chờ...');
+  }
+
+  await sleep(1000);
   prog(item.id, 40);
 
-  // Chờ kết quả
+  // Chờ kết quả — truyền snapshot để so sánh URL thay vì đếm elements
   const timeout = mode.includes('video') ? 600000 : 180000;
   const result = await waitForResult(item.id, mode, timeout, snapSrcs);
 
   // Download
   if (result?.url) {
-    const savePath = buildSavePath(item, mode, platform, settings);
+    const savePath = buildSavePath(item, mode, settings);
     setStatus(`<div style="color:#00e5a0">✅ Xong! Đang tải về...</div>`, '#00e5a0');
     await downloadResult(result.url, savePath, result.ext);
   }
@@ -165,18 +198,11 @@ async function runItem(item, mode, platform, delayMs, settings = {}) {
   chrome.runtime.sendMessage({ type: 'ITEM_DONE', id: item.id, result });
 }
 
-// ── Chụp snapshot các URL media hiện có ──
+// ── Chụp snapshot các URL media hiện có (gọi TRƯỚC khi submit) ──
 function takeMediaSnapshot(mode) {
   const isVideo = mode.includes('video');
-  const isAudio = mode === 'text-to-speech';
   const srcs = new Set();
-  if (isAudio) {
-    document.querySelectorAll('audio').forEach(a => {
-      if (a.src) srcs.add(a.src);
-      if (a.currentSrc) srcs.add(a.currentSrc);
-      a.querySelectorAll('source').forEach(s => { if (s.src) srcs.add(s.src); });
-    });
-  } else if (isVideo) {
+  if (isVideo) {
     document.querySelectorAll('video').forEach(v => {
       if (v.src) srcs.add(v.src);
       if (v.currentSrc) srcs.add(v.currentSrc);
@@ -191,102 +217,81 @@ function takeMediaSnapshot(mode) {
 }
 
 // ── Đợi kết quả mới xuất hiện ──
+// Detect CẢ video lẫn ảnh — tránh treo khi mode không khớp với model Google đang dùng
 async function waitForResult(itemId, mode, timeout, snapSrcs = new Set()) {
   const start = Date.now();
   const preferVideo = mode.includes('video');
-  const isAudio = mode === 'text-to-speech';
   let p = 40;
 
   while (Date.now() - start < timeout) {
     await sleep(4000);
-    p = Math.min(92, p + Math.random() * 3);
+    
+    // Tìm phần trăm thực tế trên trang (nếu Google Flow có hiển thị dạng "45%")
+    const pageText = document.body.innerText || '';
+    const match = pageText.match(/(\d+)%/);
+    if (match) {
+      p = parseInt(match[1]);
+    } else {
+      p = Math.min(92, p + Math.random() * 3);
+    }
+    
     prog(itemId, Math.round(p));
     setStatus(`<div>⚙️ Đang render... <b>${Math.round(p)}%</b></div><div style="color:#888;font-size:10px">⏱ ${fmt(Date.now() - start)}</div>`);
 
-    // ── Kiểm tra AUDIO mới ──
-    if (isAudio) {
-      // Tìm audio kể cả trong Shadow DOM của Angular/LitElement
-      const allAuds = [];
-      const collectAudio = (root) => {
-        try { allAuds.push(...Array.from(root.querySelectorAll('audio'))); } catch {}
-        try { for (const el of Array.from(root.querySelectorAll('*'))) { if (el.shadowRoot) collectAudio(el.shadowRoot); } } catch {}
-      };
-      collectAudio(document);
-      const newAuds = allAuds.filter(a => {
-        const src = a.src || a.currentSrc || '';
-        return src && src.length > 10 && !snapSrcs.has(src);
-      });
-      if (newAuds.length > 0) {
-        const best = newAuds[newAuds.length - 1];
-        setStatus(`<div>🔊 Đang nạp Audio...</div>`);
+    // ── 1. Đảm bảo không còn Loading/Progress bar nào đang chạy ──
+    // Nếu Google Flow đang hiển thị thanh load/spinner, tuyệt đối không được skip!
+    const isLoading = Array.from(document.querySelectorAll('*')).some(el => {
+      const role = el.getAttribute('role');
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+      const cls = (el.className || '');
+      // Kiểm tra progressbar, spinner, hoặc text "đang tạo", "generating"
+      return role === 'progressbar' || 
+             aria.includes('đang tạo') || aria.includes('generating') || 
+             (typeof cls === 'string' && (cls.includes('spinner') || cls.includes('loading')));
+    });
 
-        // Đợi duration >= 3s (không cần phát — AI Studio không tự phát)
-        let w = 0;
-        while (w < 60) {
-          if (best.duration >= 3 || best.ended) break;
-          if (best.duration > 0) {
-            setStatus(`<div>🔊 Audio: <b>${best.duration.toFixed(1)}s</b>...</div>`);
-          }
-          await sleep(500);
-          w++;
-        }
-
-        setStatus(`<div>🔊 Đã sẵn sàng! Đang nhấn tải về...</div>`);
-        clickAudioDownloadBtn();
-        await sleep(500);
-        return { url: best.src || best.currentSrc, ext: 'wav' };
-      }
-      const newLinks = [...document.querySelectorAll('a[href*=".wav"], a[href*=".mp3"], a[download*=".wav"], a[download*=".mp3"]')].filter(l => {
-        return l.href && !snapSrcs.has(l.href);
-      });
-      if (newLinks.length > 0) {
-        const ext = newLinks[0].href.includes('.mp3') ? 'mp3' : 'wav';
-        setStatus(`<div>🔊 Đã tạo xong Audio! Đợi phát 3 giây...</div>`);
-        await sleep(3500);
-        return { url: newLinks[0].href, ext };
-      }
+    if (isLoading) {
+      continue; // Đang load, bỏ qua đoạn check ảnh dưới đây và tiếp tục chờ
     }
 
-    // ── Kiểm tra VIDEO mới ──
-    if (preferVideo) {
-      const newVids = [...document.querySelectorAll('video')].filter(v => {
-        const src = v.src || v.currentSrc || '';
-        return src && src.length > 10 && !snapSrcs.has(src);
-      });
-      if (newVids.length > 0) {
-        const best = newVids[newVids.length - 1];
-        return { url: best.src || best.currentSrc, ext: 'mp4' };
-      }
-      const newLinks = [...document.querySelectorAll('a[href*=".mp4"], a[download]')].filter(l => {
-        return l.href && (l.href.includes('.mp4') || l.download?.includes('.mp4')) && !snapSrcs.has(l.href);
-      });
-      if (newLinks.length > 0) return { url: newLinks[0].href, ext: 'mp4' };
+    // ── 2. Kiểm tra VIDEO mới ──
+    const newVids = [...document.querySelectorAll('video')].filter(v => {
+      const src = v.src || v.currentSrc || '';
+      return src && src.length > 10 && !snapSrcs.has(src);
+    });
+    if (newVids.length > 0) {
+      const best = newVids[newVids.length - 1];
+      return { url: best.src || best.currentSrc, ext: 'mp4' };
     }
+    const newLinks = [...document.querySelectorAll('a[href*=".mp4"], a[download]')].filter(l => {
+      return l.href && (l.href.includes('.mp4') || l.download?.includes('.mp4')) && !snapSrcs.has(l.href);
+    });
+    if (newLinks.length > 0) return { url: newLinks[0].href, ext: 'mp4' };
 
-    // ── Kiểm tra ẢNH mới ──
-    if (!preferVideo && !isAudio) {
-      const newImgs = [...document.querySelectorAll('img')].filter(i => {
-        const r = i.getBoundingClientRect();
-        const src = i.src || '';
-        return r.width > 100 && r.height > 100
-          && src && !snapSrcs.has(src)
-          && (src.startsWith('blob:')
-            || src.includes('googleapis')
-            || src.includes('storage.google')
-            || src.includes('lh3.google')
-            || src.includes('googleusercontent')
-            || src.includes('labs.google'));
-      });
-      if (newImgs.length > 0) {
-        return { url: newImgs[newImgs.length - 1].src, ext: 'png' };
-      }
+    // ── Kiểm tra ẢNH mới (luôn check, không phụ thuộc mode — Imagen 4 trả ảnh) ──
+    const newImgs = [...document.querySelectorAll('img')].filter(i => {
+      const r = i.getBoundingClientRect();
+      const src = i.src || '';
+      return r.width > 100 && r.height > 100
+        && src && !snapSrcs.has(src)
+        && (src.startsWith('blob:')
+          || src.includes('googleapis')
+          || src.includes('storage.google')
+          || src.includes('lh3.google')
+          || src.includes('googleusercontent')
+          || src.includes('labs.google'));
+    });
+    if (newImgs.length > 0) {
+      return { url: newImgs[newImgs.length - 1].src, ext: preferVideo ? 'mp4' : 'png' };
     }
   }
   const modeLabel = mode.replace(/-/g, ' ');
-  throw new Error(`Timeout ${Math.round(timeout / 60000)} phút — không thấy kết quả.\n1. Prompt đã nhập chưa?\n2. Mode "${modeLabel}" có khớp với trang web không?\n3. Hãy đảm bảo trang web hoạt động bình thường.`);
+  throw new Error(`Timeout ${Math.round(timeout / 60000)} phút — không thấy kết quả.\n1. Prompt đã nhập chưa?\n2. Mode "${modeLabel}" có khớp với Google Flow không?\n3. Với mode cần ảnh input (Frame/Img2Img), hãy upload ảnh trước.`);
 }
 
 // ── Download kết quả ──
+// Blob URL chỉ accessible trong page context (không gửi qua background được)
+// → Convert sang dataURL trước, rồi gửi background download
 async function downloadResult(url, savePath, ext) {
   if (url.startsWith('blob:')) {
     try {
@@ -300,6 +305,7 @@ async function downloadResult(url, savePath, ext) {
       });
       chrome.runtime.sendMessage({ type: 'DOWNLOAD_FILE', url: dataUrl, filename: savePath + '.' + ext });
     } catch (e) {
+      // Fallback: anchor click — mất subfolder path nhưng vẫn tải được file
       console.warn('[VEO] blob→dataURL failed, dùng anchor fallback:', e.message);
       const a = document.createElement('a');
       a.href = url;
@@ -309,90 +315,50 @@ async function downloadResult(url, savePath, ext) {
       document.body.removeChild(a);
     }
   } else {
+    // URL thường (https) — gửi background download bình thường
     chrome.runtime.sendMessage({ type: 'DOWNLOAD_FILE', url, filename: savePath + '.' + ext });
   }
 }
 
 // ── Helpers ──
-function buildSavePath(item, mode, platform, settings = {}) {
+function buildSavePath(item, mode, settings = {}) {
   const root = settings.root || 'VEO_Automation';
   const project = settings.project || '';
   const useDate = settings.organizeByDate;
+  const useMode = settings.organizeByMode !== false;
   const dateStr = new Date().toISOString().slice(0, 10);
 
   let itemName = item.name;
-  if (!itemName) itemName = 'SCENE_' + String(item.id).padStart(2, '0');
-  itemName = itemName.replace(/^_+|_+$/g, '');
-
-  // Với AI Studio Speech: trích thời gian ra khỏi tên để đặt đúng format
-  let name;
-  if (platform === 'aistudio-speech') {
-    const tm = itemName.match(/(\d+-\d+)_to_(\d+-\d+)_?(.*)/);
-    if (tm) {
-      const start = tm[1], end = tm[2];
-      const topic = tm[3].replace(/^_+|_+$/g, '') || itemName.split('_')[0] || 'SCENE';
-      name = String(item.id).padStart(3, '0') + '_' + topic + '_' + start + '_to_' + end;
-    } else {
-      name = String(item.id).padStart(3, '0') + '_' + itemName;
-    }
-  } else {
-    name = String(item.id).padStart(3, '0') + '_' + itemName;
+  if (!itemName) {
+    itemName = 'SCENE_' + String(item.id).padStart(2, '0');
   }
 
-  // Cấu trúc thư mục
+  const name = String(item.id).padStart(3, '0') + '_' + itemName;
+
+  const folderMap = {
+    'text-to-video': 'videos', 'frame-to-video': 'frame-videos',
+    'ingredients-to-video': 'ingredient-videos', 'text-to-image': 'images',
+    'image-to-image': 'img2img', 'last-image-to-image': 'last-img',
+  };
+  const modeFolder = folderMap[mode] || (mode.includes('video') ? 'videos' : 'images');
+
   const parts = [root];
   if (project) parts.push(project);
-
-  if (platform === 'meta-ai') {
-    parts.push('HÀNH ĐỘNG');
-    if (useDate) parts.push(dateStr);
-    parts.push('frame-videos');
-  } else if (platform === 'aistudio-speech') {
-    parts.push('ÂM THANH');
-    if (useDate) parts.push(dateStr);
-    parts.push('am_thanh');
-  } else {
-    if (useDate) parts.push(dateStr);
-    parts.push('images');
-  }
-
+  if (useDate) parts.push(dateStr);
+  if (useMode) parts.push(modeFolder);
   parts.push(name);
   return parts.join('/');
-}
-
-// Tìm và click nút Download (⬇) trong AI Studio audio player
-function clickAudioDownloadBtn() {
-  const search = (root) => {
-    try {
-      for (const btn of Array.from(root.querySelectorAll('button, [role="button"]'))) {
-        const label = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '').toLowerCase();
-        if ((label.includes('download') || label.includes('tải')) && !label.includes('upload')) {
-          const r = btn.getBoundingClientRect();
-          if (r.width > 0 && r.height > 0) { btn.click(); return true; }
-        }
-      }
-    } catch {}
-    try {
-      for (const icon of Array.from(root.querySelectorAll('mat-icon, .material-icons, .material-symbols-outlined'))) {
-        const t = (icon.textContent || '').trim();
-        if (t === 'download' || t === 'file_download') {
-          const btn = icon.closest('button, [role="button"]');
-          if (btn) { const r = btn.getBoundingClientRect(); if (r.width > 0 && r.height > 0) { btn.click(); return true; } }
-        }
-      }
-    } catch {}
-    try {
-      for (const el of Array.from(root.querySelectorAll('*'))) {
-        if (el.shadowRoot && search(el.shadowRoot)) return true;
-      }
-    } catch {}
-    return false;
-  };
-  return search(document);
 }
 
 function prog(id, pct) { chrome.runtime.sendMessage({ type: 'ITEM_PROGRESS', id, progress: pct }).catch(() => {}); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function fmt(ms) { const s = Math.round(ms / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`; }
+async function getCurrentTabId() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'GET_CURRENT_TAB' }, (res) => {
+      resolve(res?.tabId || null);
+    });
+  });
+}
 
 console.log('[VEO content] ✓ Bridge ready —', location.href);

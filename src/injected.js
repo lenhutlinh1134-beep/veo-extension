@@ -16,6 +16,13 @@
       if (action === 'CLICK_SUBMIT') reply(id, clickSubmit());
       if (action === 'SCAN_PAGE') reply(id, scanPage());
       if (action === 'UPLOAD_FILE') reply(id, await uploadFile(payload.imageBase64, payload.filename));
+      if (action === 'CHECK_RENDER_STARTED') reply(id, checkRenderStarted(payload.snapshot || []));
+      if (action === 'IS_SUBMIT_ENABLED') reply(id, isSubmitEnabled());
+      if (action === 'FOCUS_INPUT') {
+        const inp = findInput();
+        if (inp) inp.focus();
+        reply(id, {ok: true});
+      }
     } catch (err) {
       reply(id, { ok: false, error: err.message });
     }
@@ -382,6 +389,61 @@
     }
 
     return { ok: false, error: 'Không tìm thấy nút Generate hoặc ô nhập. Trang chưa load xong hoặc Google đã đổi UI?' };
+  }
+
+  // ── Kiểm tra nút gửi đã enable chưa ──
+  function isSubmitEnabled() {
+    const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
+    for (const btn of btns) {
+      const txt = (btn.textContent || '') + ' ' + (btn.getAttribute('aria-label') || '') + ' ' + btn.innerHTML;
+      if (!/arrow_forward|arrow_upward|send|gửi/i.test(txt)) continue;
+
+      const rect = btn.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+
+      const disabled = btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true' || (btn instanceof HTMLButtonElement && btn.disabled);
+      if (!disabled) {
+        return { enabled: true };
+      }
+    }
+    return { enabled: false };
+  }
+
+  // ── Kiểm tra render đã bắt đầu chưa (progress % / spinner / ảnh mới) ──
+  function checkRenderStarted(beforeSnapshot = []) {
+    const beforeSet = new Set(beforeSnapshot);
+
+    // 1️⃣ Kiểm tra % progress ("45%", "90%", etc.)
+    const pageText = document.body.innerText || '';
+    if (/(\d+)%/.test(pageText)) {
+      return { started: true, reason: 'progress-percent' };
+    }
+
+    // 2️⃣ Kiểm tra progress bar / spinner
+    for (const el of document.querySelectorAll('*')) {
+      const role = el.getAttribute('role');
+      const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+      const cls = (el.className || '').toLowerCase();
+      if (role === 'progressbar' || aria.includes('đang tạo') || aria.includes('generating') || cls.includes('spinner') || cls.includes('loading')) {
+        return { started: true, reason: 'progress-bar' };
+      }
+    }
+
+    // 3️⃣ Kiểm tra ảnh/video mới xuất hiện
+    for (const img of document.querySelectorAll('img')) {
+      const src = img.src || '';
+      const rect = img.getBoundingClientRect();
+      if (src && !beforeSet.has(src) && rect.width > 50 && rect.height > 50) {
+        return { started: true, reason: 'new-image' };
+      }
+    }
+    for (const vid of document.querySelectorAll('video')) {
+      if (vid.src && !beforeSet.has(vid.src)) {
+        return { started: true, reason: 'new-video' };
+      }
+    }
+
+    return { started: false, reason: 'nothing-detected' };
   }
 
   // ── Utility ──

@@ -18,30 +18,44 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         Q.mode = msg.mode||'text-to-video';
         Q.platform = msg.platform||'google-flow';
         Q.delayMs = (msg.delaySeconds||5)*1000;
-        Q.done = []; Q.failed = []; Q.running = [];
-        Q.isRunning = true;
         Q.settings = msg.settings || {};
+        Q.done=[]; Q.failed=[]; Q.running=[];
+        Q.isRunning = true;
         broadcast();
         processQueue();
-        sendResponse({ok:true}); break;
+        sendResponse({ ok: true });
+        break;
+
       case 'STOP_QUEUE':
-        Q.isRunning = false; broadcast();
-        sendResponse({ok:true}); break;
-      case 'GET_STATE':
-        sendResponse(pubState()); break;
+        Q.isRunning = false;
+        Q.queue.forEach(i => i.status='stopped'); Q.queue=[];
+        broadcast(); sendResponse({ ok:true });
+        break;
+
+      case 'GET_STATE': sendResponse(pubState()); break;
+
+      case 'GET_CURRENT_TAB': {
+        // Trả tabId của tab Google Flow đang mở
+        const platform2 = 'google-flow';
+        const flowTab = await findFlowTab(platform2);
+        sendResponse({ tabId: flowTab?.id || null });
+        break;
+      }
+
       case 'ITEM_PROGRESS': {
         const it = findById(msg.id);
-        if (it) { it.progress = msg.progress; broadcast(); }
-        sendResponse({ok:true}); break;
+        if (it) { it.progress=msg.progress; it.status='running'; }
+        broadcast(); break;
       }
       case 'ITEM_DONE':
-        move(msg.id,'done',{progress:100}); broadcast();
-        if(Q.isRunning) setTimeout(processQueue,2000);
-        sendResponse({ok:true}); break;
+        move(msg.id,'done',{result:msg.result,progress:100});
+        broadcast(); if(Q.isRunning) processQueue(); break;
+
       case 'ITEM_FAILED': {
         const it = findById(msg.id);
-        if (it && it.retries < 2 && msg.error && msg.error.includes('Timeout')) {
-          it.retries++;
+        if (it && it.retries < 1) {
+          it.retries++; it.status='waiting';
+          // Chỉ đưa vào lại queue nếu nó đang nằm trong running (tránh lỗi duplicate từ tiến trình cũ)
           if (Q.running.find(x => x.id === msg.id)) {
             Q.running = Q.running.filter(x=>x.id!==msg.id);
             Q.queue.unshift(it);
@@ -50,22 +64,171 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         broadcast(); if(Q.isRunning) setTimeout(processQueue,3000); break;
       }
       case 'DOWNLOAD_FILE':
-        try {
-          const r = await fetch('http://localhost:4000/api/save-file', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename: msg.filename, url: msg.url.startsWith('http') ? msg.url : undefined, dataUrl: msg.url.startsWith('data:') ? msg.url : undefined })
-          });
-          if (!r.ok) throw new Error('Local server failed');
-        } catch (e) {
-          chrome.downloads.download({ url:msg.url, filename:msg.filename, saveAs:false }).catch(console.warn);
-        }
+        chrome.downloads.download({ url:msg.url, filename:msg.filename, saveAs:false }).catch(console.warn);
         sendResponse({ok:true}); break;
+
+      case 'TRUSTED_CLICK': {
+        // Dùng chrome.debugger để gửi real mouse click (isTrusted=true) vào tab
+        const tabId2 = msg.tabId;
+        const x = msg.x;
+        const y = msg.y;
+        try {
+          await new Promise((resolve, reject) => {
+            chrome.debugger.attach({tabId: tabId2}, '1.3', () => {
+              if (chrome.runtime.lastError) { reject(chrome.runtime.lastError); return; }
+              resolve();
+            });
+          });
+          // mousePressed
+          await new Promise(r => chrome.debugger.sendCommand({tabId: tabId2}, 'Input.dispatchMouseEvent', {
+            type: 'mousePressed', x, y, button: 'left', clickCount: 1, buttons: 1
+          }, r));
+          await new Promise(r => setTimeout(r, 80));
+          // mouseReleased
+          await new Promise(r => chrome.debugger.sendCommand({tabId: tabId2}, 'Input.dispatchMouseEvent', {
+            type: 'mouseReleased', x, y, button: 'left', clickCount: 1, buttons: 0
+          }, r));
+          await new Promise(r => setTimeout(r, 80));
+          // Detach
+          await new Promise(r => chrome.debugger.detach({tabId: tabId2}, r));
+          sendResponse({ok: true});
+        } catch(e) {
+          try { chrome.debugger.detach({tabId: tabId2}, ()=>{}); } catch {}
+          sendResponse({ok: false, error: e.message});
+        }
+        break;
+      }
+
+      case 'TRUSTED_ENTER': {
+        // Gửi phím Enter vật lý (isTrusted=true) vào tab
+        const tabId2 = msg.tabId;
+        let debuggerAttached = false;
+
+        try {
+          // Đảm bảo debugger attach
+          await new Promise((resolve, reject) => {
+            chrome.debugger.attach({tabId: tabId2}, '1.3', () => {
+              if (chrome.runtime.lastError) {
+                if (chrome.runtime.lastError.message.includes('Already attached')) {
+                  debuggerAttached = true;
+                  resolve();
+                  return;
+                }
+                reject(chrome.runtime.lastError);
+                return;
+              }
+              debuggerAttached = true;
+              resolve();
+            });
+          });
+
+          console.log('[CDP] Debugger attached to tabId:', tabId2);
+
+          // ── CHIẾN LƯỢC 1: Enter thường ──
+          console.log('[CDP] Sending simple Enter...');
+          await new Promise(r => {
+            chrome.debugger.sendCommand({tabId: tabId2}, 'Input.dispatchKeyEvent', {
+              type: 'keyDown',
+              key: 'Enter',
+              code: 'Enter',
+              windowsVirtualKeyCode: 13,
+              nativeVirtualKeyCode: 13,
+              isSystemKey: false
+            }, (result) => {
+              if (chrome.runtime.lastError) console.warn('[CDP] keyDown error:', chrome.runtime.lastError.message);
+              r();
+            });
+          });
+
+          await new Promise(r => setTimeout(r, 100));
+
+          await new Promise(r => {
+            chrome.debugger.sendCommand({tabId: tabId2}, 'Input.dispatchKeyEvent', {
+              type: 'keyUp',
+              key: 'Enter',
+              code: 'Enter',
+              windowsVirtualKeyCode: 13,
+              nativeVirtualKeyCode: 13
+            }, (result) => {
+              if (chrome.runtime.lastError) console.warn('[CDP] keyUp error:', chrome.runtime.lastError.message);
+              r();
+            });
+          });
+
+          await new Promise(r => setTimeout(r, 500));
+          console.log('[CDP] Simple Enter sent successfully');
+          sendResponse({ok: true, method: 'simple-enter'});
+
+        } catch(err1) {
+          console.warn('[CDP] Simple Enter failed, trying Ctrl+Enter:', err1.message);
+
+          try {
+            // ── FALLBACK: Ctrl+Enter ──
+            if (!debuggerAttached) {
+              await new Promise((resolve, reject) => {
+                chrome.debugger.attach({tabId: tabId2}, '1.3', () => {
+                  if (chrome.runtime.lastError && !chrome.runtime.lastError.message.includes('Already attached')) {
+                    reject(chrome.runtime.lastError);
+                    return;
+                  }
+                  resolve();
+                });
+              });
+            }
+
+            console.log('[CDP] Sending Ctrl+Enter...');
+
+            await new Promise(r => {
+              chrome.debugger.sendCommand({tabId: tabId2}, 'Input.dispatchKeyEvent', {
+                type: 'keyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17
+              }, r);
+            });
+
+            await new Promise(r => setTimeout(r, 50));
+
+            await new Promise(r => {
+              chrome.debugger.sendCommand({tabId: tabId2}, 'Input.dispatchKeyEvent', {
+                type: 'keyDown', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13
+              }, r);
+            });
+
+            await new Promise(r => setTimeout(r, 100));
+
+            await new Promise(r => {
+              chrome.debugger.sendCommand({tabId: tabId2}, 'Input.dispatchKeyEvent', {
+                type: 'keyUp', modifiers: 2, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13
+              }, r);
+            });
+
+            await new Promise(r => setTimeout(r, 50));
+
+            await new Promise(r => {
+              chrome.debugger.sendCommand({tabId: tabId2}, 'Input.dispatchKeyEvent', {
+                type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17
+              }, r);
+            });
+
+            await new Promise(r => setTimeout(r, 500));
+            console.log('[CDP] Ctrl+Enter sent successfully');
+            sendResponse({ok: true, method: 'ctrl-enter'});
+
+          } catch(err2) {
+            console.error('[CDP] Both Enter methods failed:', err2.message);
+            sendResponse({ok: false, error: 'Enter failed: ' + err2.message});
+          }
+        }
+        break;
+      }
 
       case 'TEST_CONNECTION': {
         const platform = msg.platform || 'google-flow';
         const t = await findFlowTab(platform);
         if (!t) { sendResponse({ok:false,reason:'no_tab'}); break; }
+        // KẾT NỐI: đưa tab Google Flow ra trước + focus cửa sổ → giao diện khớp, sẵn sàng
+        try {
+          await chrome.tabs.update(t.id, { active: true });
+          if (t.windowId != null) await chrome.windows.update(t.windowId, { focused: true });
+        } catch {}
         await ensureScript(t.id);
         try {
           const res = await msgTab(t.id,{type:'TEST_CONNECTION', platform});
@@ -78,29 +241,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true;
 });
 
-// ── Queue processor ──
 async function processQueue() {
-  if (!Q.isRunning || Q.queue.length === 0) return;
+  if (!Q.isRunning) return;
   while (Q.running.length < Q.concurrency && Q.queue.length > 0) {
     const item = Q.queue.shift();
-    item.status = 'running';
-    Q.running.push(item);
-    broadcast();
-
+    item.status='running'; Q.running.push(item); broadcast();
     const tab = await findFlowTab(Q.platform);
-    if (!tab) {
-      move(item.id,'failed',{error:'Không tìm thấy tab. Hãy mở trang Google Flow / Meta AI / AI Studio.'});
-      broadcast(); continue;
-    }
+    if (!tab) { move(item.id,'failed',{error:`Không tìm thấy tab ${Q.platform === 'meta-ai' ? 'Meta AI' : 'Google Flow'}. Hãy mở trang tương ứng trước`}); broadcast(); continue; }
     await ensureScript(tab.id);
     try {
-      await msgTab(tab.id, {
-        type:'PROCESS_ITEM', item, mode:Q.mode, platform:Q.platform, delayMs:Q.delayMs, settings:Q.settings
-      });
-    } catch(e) {
-      move(item.id,'failed',{error:e.message}); broadcast();
-    }
+      await msgTab(tab.id,{type:'PROCESS_ITEM', item, mode:Q.mode, platform:Q.platform, delayMs:Q.delayMs, settings:Q.settings});
+    } catch(e) { move(item.id,'failed',{error:e.message}); broadcast(); }
   }
+  if (Q.queue.length===0 && Q.running.length===0) { Q.isRunning=false; broadcast(); }
 }
 
 async function ensureScript(tabId) {
@@ -111,18 +264,13 @@ async function ensureScript(tabId) {
   } catch(e) { console.warn('[VEO BG] inject failed:',e.message); }
 }
 
-// Tìm tab làm việc
+// Tìm tab làm việc — hỗ trợ cả Google Flow và Meta AI
 async function findFlowTab(platform = 'google-flow') {
   if (platform === 'meta-ai') {
     const tabs = await chrome.tabs.query({url:'*://*.meta.ai/*'}).catch(()=>[]);
     if (tabs.length) return tabs[0];
     const all = await chrome.tabs.query({}).catch(()=>[]);
     return all.find(t => t.url && t.url.includes('meta.ai')) || null;
-  } else if (platform === 'aistudio-speech') {
-    const tabs = await chrome.tabs.query({url:'https://aistudio.google.com/*'}).catch(()=>[]);
-    if (tabs.length) return tabs[0];
-    const all = await chrome.tabs.query({}).catch(()=>[]);
-    return all.find(t => t.url && t.url.includes('aistudio.google.com')) || null;
   } else {
     for (const p of ['https://labs.google/fx/*','https://labs.google.com/fx/*']) {
       const tabs = await chrome.tabs.query({url:p}).catch(()=>[]);
@@ -143,6 +291,7 @@ function msgTab(tabId, msg) {
 }
 
 function pubState() {
+  // queue chỉ chứa waiting items (KHÔNG bao gồm running) — tránh render trùng lặp trong UI
   return { queue:Q.queue, running:Q.running, done:Q.done, failed:Q.failed,
     isRunning:Q.isRunning, total:Q.running.length+Q.queue.length+Q.done.length+Q.failed.length,
     doneCount:Q.done.length, failedCount:Q.failed.length };
